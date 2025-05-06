@@ -3,9 +3,9 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
-  ErrorCode,
-  ListToolsRequestSchema,
   McpError,
+  ListToolsRequestSchema,
+  ErrorCode, // 使用SDK提供的ErrorCode
 } from '@modelcontextprotocol/sdk/types.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -21,13 +21,16 @@ interface WxConfig {
 
 class WechatMiniappServer {
   private server: Server;
-  private config: WxConfig = {};
+  private config: WxConfig = {
+    cli: process.env.WECHAT_CLI_PATH,
+    projectPath: process.env.PROJECT_PATH
+  };
 
   constructor() {
     this.server = new Server(
       {
         name: 'wechat-miniapp-server',
-        version: '0.1.0',
+        version: '1.0.0',
       },
       {
         capabilities: {
@@ -38,7 +41,6 @@ class WechatMiniappServer {
 
     this.setupToolHandlers();
     
-    // Error handling
     this.server.onerror = (error) => console.error('[MCP Error]', error);
     process.on('SIGINT', async () => {
       await this.server.close();
@@ -54,8 +56,8 @@ class WechatMiniappServer {
   private async executeDevCommand(command: string) {
     if (!this.config.cli) {
       throw new McpError(
-        ErrorCode.ConfigurationError,
-        'WeChat DevTools CLI path not configured'
+        ErrorCode.InvalidParams, // 使用SDK提供的错误码
+        'WeChat DevTools CLI path not configured. Set WECHAT_CLI_PATH environment variable.'
       );
     }
     try {
@@ -63,7 +65,7 @@ class WechatMiniappServer {
       return { stdout, stderr };
     } catch (error) {
       throw new McpError(
-        ErrorCode.ExecutionError,
+        ErrorCode.InternalError, // 使用SDK提供的错误码
         `Failed to execute command: ${error}`
       );
     }
@@ -74,91 +76,55 @@ class WechatMiniappServer {
       tools: [
         {
           name: 'configure',
-          description: '配置微信开发者工具CLI路径和项目路径',
+          description: 'Configure WeChat DevTools CLI path and project path',
           inputSchema: {
             type: 'object',
             properties: {
-              cli: {
-                type: 'string',
-                description: '微信开发者工具CLI路径'
-              },
-              projectPath: {
-                type: 'string',
-                description: '小程序项目路径'
-              }
-            },
-            required: ['cli', 'projectPath']
+              cli: { type: 'string', description: 'WeChat DevTools CLI path' },
+              projectPath: { type: 'string', description: 'MiniProgram project path' }
+            }
           }
         },
         {
           name: 'create_page',
-          description: '创建微信小程序页面，包含WXML、WXSS、JS和JSON文件',
+          description: 'Create WeChat MiniProgram page files',
           inputSchema: {
             type: 'object',
             properties: {
-              pagePath: {
-                type: 'string',
-                description: '页面路径（例如：pages/index或pages/user/profile）'
-              }
+              pagePath: { type: 'string', description: 'Page path (e.g. pages/index)' }
             },
             required: ['pagePath']
           }
         },
         {
           name: 'create_component',
-          description: '创建微信小程序自定义组件',
+          description: 'Create WeChat MiniProgram component',
           inputSchema: {
             type: 'object',
             properties: {
-              componentPath: {
-                type: 'string',
-                description: '组件路径（例如：components/header）'
-              }
+              componentPath: { type: 'string', description: 'Component path (e.g. components/header)' }
             },
             required: ['componentPath']
           }
         },
         {
           name: 'open_project',
-          description: '在微信开发者工具中打开项目',
-          inputSchema: {
-            type: 'object',
-            properties: {},
-            required: []
-          }
-        },
-        {
-          name: 'build_npm',
-          description: '构建npm包',
-          inputSchema: {
-            type: 'object',
-            properties: {},
-            required: []
-          }
+          description: 'Open project in WeChat DevTools',
+          inputSchema: { type: 'object' }
         },
         {
           name: 'preview',
-          description: '预览小程序',
-          inputSchema: {
-            type: 'object',
-            properties: {},
-            required: []
-          }
+          description: 'Generate preview QR code',
+          inputSchema: { type: 'object' }
         },
         {
           name: 'upload',
-          description: '上传小程序代码',
+          description: 'Upload MiniProgram code',
           inputSchema: {
             type: 'object',
             properties: {
-              version: {
-                type: 'string',
-                description: '版本号'
-              },
-              desc: {
-                type: 'string',
-                description: '版本描述'
-              }
+              version: { type: 'string', description: 'Version number' },
+              desc: { type: 'string', description: 'Version description' }
             },
             required: ['version', 'desc']
           }
@@ -172,12 +138,10 @@ class WechatMiniappServer {
           const { cli, projectPath } = request.params.arguments as WxConfig;
           this.config = { cli, projectPath };
           return {
-            content: [
-              {
-                type: 'text',
-                text: `Configuration updated:\nCLI: ${cli}\nProject Path: ${projectPath}`
-              }
-            ]
+            content: [{
+              type: 'text',
+              text: `Configuration updated:\nCLI: ${cli}\nProject: ${projectPath}`
+            }]
           };
         }
 
@@ -185,41 +149,23 @@ class WechatMiniappServer {
           const { pagePath } = request.params.arguments as { pagePath: string };
           if (!this.config.projectPath) {
             throw new McpError(
-              ErrorCode.ConfigurationError,
+              ErrorCode.InvalidParams,
               'Project path not configured'
             );
           }
 
           const basePath = path.join(this.config.projectPath, pagePath);
           
-          // 创建页面文件
-          await this.createFileWithContent(
-            `${basePath}.wxml`,
-            '<view class="container">\n  <!-- 页面内容 -->\n</view>'
-          );
-          
-          await this.createFileWithContent(
-            `${basePath}.wxss`,
-            '.container {\n  padding: 20px;\n}'
-          );
-          
-          await this.createFileWithContent(
-            `${basePath}.js`,
-            'Page({\n  data: {\n  },\n  onLoad() {\n  }\n})'
-          );
-          
-          await this.createFileWithContent(
-            `${basePath}.json`,
-            '{\n  "navigationBarTitleText": "新页面"\n}'
-          );
+          await this.createFileWithContent(`${basePath}.wxml`, '<view class="container">\n  <!-- Your content -->\n</view>');
+          await this.createFileWithContent(`${basePath}.wxss`, '.container {\n  padding: 20px;\n}');
+          await this.createFileWithContent(`${basePath}.js`, 'Page({\n  data: {},\n  onLoad() {}\n})');
+          await this.createFileWithContent(`${basePath}.json`, '{\n  "navigationBarTitleText": "New Page"\n}');
 
           return {
-            content: [
-              {
-                type: 'text',
-                text: `Created page files at ${pagePath}`
-              }
-            ]
+            content: [{
+              type: 'text',
+              text: `Created page at ${pagePath}`
+            }]
           };
         }
 
@@ -227,116 +173,74 @@ class WechatMiniappServer {
           const { componentPath } = request.params.arguments as { componentPath: string };
           if (!this.config.projectPath) {
             throw new McpError(
-              ErrorCode.ConfigurationError,
+              ErrorCode.InvalidParams,
               'Project path not configured'
             );
           }
 
           const basePath = path.join(this.config.projectPath, componentPath);
           
-          // 创建组件文件
-          await this.createFileWithContent(
-            `${basePath}.wxml`,
-            '<view class="component">\n  <!-- 组件内容 -->\n</view>'
-          );
-          
-          await this.createFileWithContent(
-            `${basePath}.wxss`,
-            '.component {\n  /* 组件样式 */\n}'
-          );
-          
-          await this.createFileWithContent(
-            `${basePath}.js`,
-            'Component({\n  properties: {\n  },\n  data: {\n  },\n  methods: {\n  }\n})'
-          );
-          
-          await this.createFileWithContent(
-            `${basePath}.json`,
-            '{\n  "component": true\n}'
-          );
+          await this.createFileWithContent(`${basePath}.wxml`, '<view class="component">\n  <!-- Component content -->\n</view>');
+          await this.createFileWithContent(`${basePath}.wxss`, '.component {\n  /* Component styles */\n}');
+          await this.createFileWithContent(`${basePath}.js`, 'Component({\n  properties: {},\n  data: {},\n  methods: {}\n})');
+          await this.createFileWithContent(`${basePath}.json`, '{\n  "component": true\n}');
 
           return {
-            content: [
-              {
-                type: 'text',
-                text: `Created component files at ${componentPath}`
-              }
-            ]
+            content: [{
+              type: 'text',
+              text: `Created component at ${componentPath}`
+            }]
           };
         }
 
         case 'open_project': {
           if (!this.config.projectPath) {
             throw new McpError(
-              ErrorCode.ConfigurationError,
+              ErrorCode.InvalidParams,
               'Project path not configured'
             );
           }
-          const { stdout } = await this.executeDevCommand(`open --project ${this.config.projectPath}`);
+          const { stdout } = await this.executeDevCommand(`open --project "${this.config.projectPath}"`);
           return {
-            content: [
-              {
-                type: 'text',
-                text: `Opened project in WeChat DevTools\n${stdout}`
-              }
-            ]
-          };
-        }
-
-        case 'build_npm': {
-          if (!this.config.projectPath) {
-            throw new McpError(
-              ErrorCode.ConfigurationError,
-              'Project path not configured'
-            );
-          }
-          const { stdout } = await this.executeDevCommand(`build-npm --project ${this.config.projectPath}`);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Built npm packages\n${stdout}`
-              }
-            ]
+            content: [{
+              type: 'text',
+              text: `Opened project in WeChat DevTools\n${stdout}`
+            }]
           };
         }
 
         case 'preview': {
           if (!this.config.projectPath) {
             throw new McpError(
-              ErrorCode.ConfigurationError,
+              ErrorCode.InvalidParams,
               'Project path not configured'
             );
           }
-          const { stdout } = await this.executeDevCommand(`preview --project ${this.config.projectPath}`);
+          const { stdout } = await this.executeDevCommand(`preview --project "${this.config.projectPath}"`);
           return {
-            content: [
-              {
-                type: 'text',
-                text: `Generated preview\n${stdout}`
-              }
-            ]
+            content: [{
+              type: 'text',
+              text: `Generated preview QR code\n${stdout}`
+            }]
           };
         }
 
         case 'upload': {
           if (!this.config.projectPath) {
             throw new McpError(
-              ErrorCode.ConfigurationError,
+              ErrorCode.InvalidParams,
               'Project path not configured'
             );
           }
           const { version, desc } = request.params.arguments as { version: string; desc: string };
           const { stdout } = await this.executeDevCommand(
-            `upload --project ${this.config.projectPath} -v ${version} -d "${desc}"`
+            `upload --project "${this.config.projectPath}" -v ${version} -d "${desc}"`
           );
           return {
-            content: [
-              {
-                type: 'text',
-                text: `Uploaded version ${version}\n${stdout}`
-              }
-            ]
+            content: [{
+              type: 'text',
+              text: `Uploaded version ${version}\n${stdout}`
+            }]
           };
         }
 
@@ -352,7 +256,7 @@ class WechatMiniappServer {
   async run() {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error('WeChat Mini Program MCP server running on stdio');
+    console.error('WeChat MiniProgram MCP server running');
   }
 }
 

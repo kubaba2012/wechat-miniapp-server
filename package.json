@@ -1,15 +1,18 @@
 {
-  "name": "wechat-miniapp-server",
+  "name": "wechat-miniapp-mcp",
   "version": "1.0.0",
-  "description": "WeChat Mini Program MCP Server with DevTools Integration",
+  "description": "WeChat MiniProgram MCP Server",
   "main": "build/index.js",
-  "type": "module",
   "scripts": {
     "build": "tsc",
     "start": "node build/index.js",
     "dev": "ts-node src/index.ts"
   },
-  "keywords": ["mcp", "wechat", "miniprogram", "devtools"],
+  "keywords": [
+    "wechat",
+    "miniprogram",
+    "mcp"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
